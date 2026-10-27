@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Bücherverwaltung</title>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1000px;
+      margin: 30px auto;
+      padding: 0 16px;
+      background-color: rgb(219, 154, 219);
+    }
+
+    label {
+      display: block;
+      margin-top: 12px;
+    }
+
+    input {
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 400px;
+      padding: 8px;
+    }
+
+    button {
+      padding: 8px 12px;
+      margin: 8px 4px 0 0;
+      cursor: pointer;
+    }
+
+    .tabelle {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    th, td {
+      padding: 10px;
+      border: 1px solid #ccc;
+      text-align: left;
+    }
+
+    th {
+      background: #eee;
+    }
+
+    #meldung {
+      min-height: 24px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Bücherverwaltung</h1>
+
+  <h2 id="formularTitel">Neues Buch erfassen</h2>
+
+  <form id="buchForm">
+    <label for="titel">Titel</label>
+    <input id="titel" name="titel" type="text" required>
+
+    <label for="autor">Autor</label>
+    <input id="autor" name="autor" type="text" required>
+
+    <label for="isbn">ISBN</label>
+    <input id="isbn" name="isbn" type="text"
+       placeholder="ISBN">
+
+    <label for="erscheinungsjahr">Erscheinungsjahr</label>
+    <input id="erscheinungsjahr" name="erscheinungsjahr"
+           type="number" min="1" step="1" required>
+
+    <label for="preis">Preis in CHF</label>
+    <input id="preis" name="preis" type="number"
+           min="0" step="0.01" required>
+
+    <p>
+      <button id="speichern" type="submit">Buch speichern</button>
+      <button id="abbrechen" type="button" hidden>
+        Bearbeitung abbrechen
+      </button>
+    </p>
+  </form>
+
+  <p id="meldung" role="status"></p>
+
+  <h2>Vorhandene Bücher</h2>
+  <button id="neuLaden" type="button">Liste aktualisieren</button>
+
+  <div class="tabelle">
+    <table>
+      <thead>
+        <tr>
+            <th scope="col">Titel</th>
+            <th scope="col">Autor</th>
+            <th scope="col">ISBN</th>
+            <th scope="col">Jahr</th>
+            <th scope="col">Preis in CHF</th>
+            <th scope="col">Cover</th>
+            <th scope="col">Aktionen</th>
+        </tr>
+      </thead>
+      <tbody id="buchListe"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const formular = document.getElementById('buchForm');
+    const formularTitel = document.getElementById('formularTitel');
+    const meldung = document.getElementById('meldung');
+    const liste = document.getElementById('buchListe');
+    const speichernButton = document.getElementById('speichern');
+    const abbrechenButton = document.getElementById('abbrechen');
+
+    // null = neues Buch; andernfalls ID des bearbeiteten Buches
+    let aktuelleId = null;
+
+    async function anfrage(url, optionen = {}) {
+      const antwort = await fetch(url, optionen);
+      const daten = await antwort.json();
+
+      if (!antwort.ok) {
+        throw new Error(daten.fehler || 'Anfrage fehlgeschlagen');
+      }
+
+      return daten;
+    }
+
+    function formularZuruecksetzen() {
+      aktuelleId = null;
+      formular.reset();
+      formularTitel.textContent = 'Neues Buch erfassen';
+      speichernButton.textContent = 'Buch speichern';
+      abbrechenButton.hidden = true;
+    }
+
+    function bearbeiten(buch) {
+        aktuelleId = buch._id;
+
+        formular.elements.titel.value = buch.titel ?? '';
+        formular.elements.autor.value = buch.autor ?? '';
+        formular.elements.isbn.value = buch.isbn ?? '';
+        formular.elements.erscheinungsjahr.value =
+            buch.erscheinungsjahr ?? '';
+        formular.elements.preis.value = buch.preis ?? '';
+
+        formularTitel.textContent = 'Buch bearbeiten';
+        speichernButton.textContent = 'Änderungen speichern';
+        abbrechenButton.hidden = false;
+        meldung.textContent = '';
+
+        formular.elements.titel.focus();
+}
+
+    async function loeschen(buch, button) {
+      const bestaetigt = confirm(
+        `Möchtest du „${buch.titel}“ wirklich löschen?`
+      );
+
+      if (!bestaetigt) return;
+
+      button.disabled = true;
+
+      try {
+        await anfrage(`/buecher/${buch._id}`, {
+          method: 'DELETE'
+        });
+
+        if (aktuelleId === buch._id) {
+          formularZuruecksetzen();
+        }
+
+        meldung.textContent = 'Buch gelöscht.';
+        await buecherLaden();
+      } catch (error) {
+        meldung.textContent = `Fehler: ${error.message}`;
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function buecherLaden() {
+      const buecher = await anfrage('/buecher');
+      liste.replaceChildren();
+
+      if (buecher.length === 0) {
+        const zeile = document.createElement('tr');
+        const zelle = document.createElement('td');
+
+        zelle.colSpan = 7;
+        zelle.textContent = 'Noch keine Bücher vorhanden.';
+        zeile.appendChild(zelle);
+        liste.appendChild(zeile);
+        return;
+      }
+
+      for (const buch of buecher) {
+        const zeile = document.createElement('tr');
+
+        const werte = [
+          buch.titel,
+          buch.autor,
+          buch.isbn,
+          buch.erscheinungsjahr,
+          buch.preis == null ? '' : Number(buch.preis).toFixed(2)
+        ];
+
+        for (const wert of werte) {
+          const zelle = document.createElement('td');
+          zelle.textContent = wert ?? '';
+          zeile.appendChild(zelle);
+        }
+
+    const coverZelle = document.createElement('td');
+
+    if (buch.coverId) {
+        const bild = document.createElement('img');
+        bild.src = `/buecher/${buch._id}/cover`;
+        bild.alt = `Cover von ${buch.titel}`;
+        bild.width = 80;
+        bild.loading = 'lazy';
+        bild.style.display = 'block';
+        bild.style.marginBottom = '8px';
+
+        coverZelle.appendChild(bild);
+    }
+
+    const dateiAuswahl = document.createElement('input');
+    dateiAuswahl.type = 'file';
+    dateiAuswahl.accept = 'image/jpeg,image/png';
+    dateiAuswahl.setAttribute(
+        'aria-label',
+        `Cover auswählen für ${buch.titel}`
+    );
+
+    const uploadButton = document.createElement('button');
+    uploadButton.type = 'button';
+    uploadButton.textContent = 'Cover hochladen';
+
+    uploadButton.addEventListener('click', async () => {
+        const datei = dateiAuswahl.files[0];
+
+        if (!datei) {
+            meldung.textContent = 'Bitte zuerst ein Bild auswählen.';
+            return;
+        }
+
+    const formData = new FormData();
+    formData.append('cover', datei);
+
+    uploadButton.disabled = true;
+
+    try {
+        await anfrage(`/buecher/${buch._id}/cover`, {
+        method: 'POST',
+        body: formData
+        });
+
+        meldung.textContent = 'Cover gespeichert.';
+        await buecherLaden();
+    } catch (error) {
+        meldung.textContent = `Fehler: ${error.message}`;
+    } finally {
+        uploadButton.disabled = false;
+    }
+    });
+
+    coverZelle.append(dateiAuswahl, uploadButton);
+    zeile.appendChild(coverZelle);
+
+        const aktionen = document.createElement('td');
+
+        const bearbeitenButton = document.createElement('button');
+        bearbeitenButton.type = 'button';
+        bearbeitenButton.textContent = 'Bearbeiten';
+        bearbeitenButton.addEventListener('click', () => {
+          bearbeiten(buch);
+        });
+
+        const loeschenButton = document.createElement('button');
+        loeschenButton.type = 'button';
+        loeschenButton.textContent = 'Löschen';
+        loeschenButton.addEventListener('click', () => {
+          loeschen(buch, loeschenButton);
+        });
+
+        aktionen.append(bearbeitenButton, loeschenButton);
+        zeile.appendChild(aktionen);
+        liste.appendChild(zeile);
+      }
+    }
+
+    formular.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const buch = {
+        titel: formular.elements.titel.value.trim(),
+        autor: formular.elements.autor.value.trim(),
+        isbn: formular.elements.isbn.value.trim(),
+        erscheinungsjahr:
+          Number(formular.elements.erscheinungsjahr.value),
+        preis: Number(formular.elements.preis.value)
+      };
+
+      const istBearbeitung = aktuelleId !== null;
+      const url = istBearbeitung
+        ? `/buecher/${aktuelleId}`
+        : '/buecher';
+
+      speichernButton.disabled = true;
+
+      try {
+        await anfrage(url, {
+          method: istBearbeitung ? 'PATCH' : 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(buch)
+        });
+
+        formularZuruecksetzen();
+
+        meldung.textContent = istBearbeitung
+          ? 'Buch aktualisiert.'
+          : 'Buch gespeichert.';
+
+        await buecherLaden();
+      } catch (error) {
+        meldung.textContent = `Fehler: ${error.message}`;
+      } finally {
+        speichernButton.disabled = false;
+      }
+    });
+
+    abbrechenButton.addEventListener('click', () => {
+      formularZuruecksetzen();
+      meldung.textContent = '';
+    });
+
+    document.getElementById('neuLaden').addEventListener('click', () => {
+      buecherLaden().catch(error => {
+        meldung.textContent = `Fehler: ${error.message}`;
+      });
+    });
+
+    buecherLaden().catch(error => {
+      meldung.textContent = `Fehler: ${error.message}`;
+    });
+  </script>
+</body>
+</html>
